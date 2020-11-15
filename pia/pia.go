@@ -25,6 +25,12 @@ import (
 	"golang.zx2c4.com/wireguard/wgctrl/wgtypes"
 )
 
+type ContextKey string
+
+const (
+	ctxResolve ContextKey = "resolve"
+)
+
 // TODO: In future releases of Go it's better to use brand-new go:embed comment directive
 // More on: https://go.googlesource.com/proposal/+/master/design/draft-embed.md
 const (
@@ -91,7 +97,9 @@ func verifySignature(message, signature string) error {
 	}
 
 	hasher := sha256.New()
-	hasher.Write([]byte(message))
+	if _, err := hasher.Write([]byte(message)); err != nil {
+		return err
+	}
 	hashed := hasher.Sum(nil)
 
 	rawSignature, err := base64.StdEncoding.DecodeString(signature)
@@ -99,9 +107,9 @@ func verifySignature(message, signature string) error {
 		return err
 	}
 
-	switch publicKey.(type) {
+	switch publicKey := publicKey.(type) {
 	case *rsa.PublicKey:
-		if err := rsa.VerifyPKCS1v15(publicKey.(*rsa.PublicKey), crypto.SHA256, hashed, rawSignature); err != nil {
+		if err := rsa.VerifyPKCS1v15(publicKey, crypto.SHA256, hashed, rawSignature); err != nil {
 			return err
 		}
 	default:
@@ -142,8 +150,8 @@ func NewClient() (*Client, error) {
 		KeepAlive: 30 * time.Second,
 	}
 	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		if value := ctx.Value("resolve"); value != nil {
-			if value, ok := ctx.Value("resolve").(string); !ok {
+		if value := ctx.Value(ctxResolve); value != nil {
+			if value, ok := ctx.Value(ctxResolve).(string); !ok {
 				return nil, errors.New("invalid input")
 			} else {
 				addr = value
@@ -252,7 +260,7 @@ func (c *Client) generateToken(username, password, commonName, ip string) (strin
 	if err != nil {
 		return "", err
 	}
-	req = req.WithContext(context.WithValue(context.Background(), "resolve", ip+":443"))
+	req = req.WithContext(context.WithValue(context.Background(), ctxResolve, ip+":443"))
 
 	resp, err := c.HTTPClient.Do(req)
 	if err != nil {
@@ -291,7 +299,7 @@ func (c *Client) addKey(token string, pubkey wgtypes.Key, commonName, ip string)
 	if err != nil {
 		return nil, err
 	}
-	req = req.WithContext(context.WithValue(context.Background(), "resolve", ip+":1337"))
+	req = req.WithContext(context.WithValue(context.Background(), ctxResolve, ip+":1337"))
 
 	addKeyResp, err := c.HTTPClient.Do(req)
 	if err != nil {
